@@ -7,6 +7,9 @@ from sklearn.preprocessing import LabelEncoder
 import pandas as pd
 from tqdm import tqdm
 import wandb
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class PeptideDataset(Dataset):
