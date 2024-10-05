@@ -6,50 +6,70 @@ import os
 DATA_DIR = 'data/PestycydoweAMPs'
 
 
-def process_amp_files(directory):
+def process_fasta_files(directory):
     data = []
-    categories = ['amp', 'namp_faba', 'namp_viri']
-    datasets = ['train', 'test']
+    processed_files = set()
 
-    for category in categories:
-        for dataset in datasets:
-            filename = f"{category}_{dataset}.fasta" if category == 'amp' else f"{category}_{dataset}"
+    for filename in os.listdir(directory):
+        if filename.endswith('.fasta'):
+            base_filename = filename[:-6]  # Remove '.fasta'
+            if base_filename in processed_files:
+                continue
+            processed_files.add(base_filename)
+
             file_path = os.path.join(directory, filename)
 
-            if os.path.exists(file_path):
-                with open(file_path, 'r') as file:
-                    sequence = ""
-                    for line in file:
-                        if line.startswith('>'):
-                            if sequence:
-                                data.append({
-                                    'category': category,
-                                    'dataset': dataset,
-                                    'sequence': sequence.strip()
-                                })
-                                sequence = ""
-                        else:
-                            sequence += line.strip()
+            parts = base_filename.split('_')
+            if parts[0] == 'amp':
+                category = 'amp'
+            elif len(parts) >= 2:
+                category = f"{parts[0]}_{parts[1]}"
+            else:
+                category = parts[0]
 
-                    # Add the last sequence
-                    if sequence:
-                        data.append({
-                            'category': category,
-                            'dataset': dataset,
-                            'sequence': sequence.strip()
-                        })
+            with open(file_path, 'r') as file:
+                current_id = None
+                sequence = ""
 
-    return pd.DataFrame(data)
+                for line in file:
+                    line = line.strip()
+                    if line.startswith('>'):
+                        if current_id and sequence:
+                            data.append({
+                                'id': current_id,
+                                'category': category,
+                                'sequence': sequence
+                            })
+
+                        current_id = line[1:]  # Remove the '>' character
+                        sequence = ""
+                    elif line:
+                        sequence += line
+
+                if current_id and sequence:
+                    data.append({
+                        'id': current_id,
+                        'category': category,
+                        'sequence': sequence
+                    })
+
+    df = pd.DataFrame(data)
+    return df
 
 
 def main():
-    df = process_amp_files(DATA_DIR)
+    df = process_fasta_files(DATA_DIR)
 
-    df = (df.rename(columns={'category': 'target'}))
-    df = df.drop(columns='dataset')
-    print(df.head(2))
+    print(df.head())
+
+    # Print category distribution
+    category_counts = df['category'].value_counts()
+    print("\nCategory distribution:")
+    print(category_counts)
+    df = df.drop(columns=['id']).rename(columns={'category': 'target'})
 
     df.to_csv('pesticides_peptides.csv', index=False)
+    print(df.head(2))
 
 
 if __name__ == '__main__':
