@@ -42,40 +42,14 @@ def process_amp_files(directory):
     return pd.DataFrame(data)
 
 
-def vectorize_sequence_column(df, sequence_column='sequence'):
-    vectorizer = CountVectorizer(analyzer='char', lowercase=False)
-
-    # Fit and transform the sequences
-    vector_matrix = vectorizer.fit_transform(df[sequence_column])
-
-    # Get the feature names (amino acids)
-    feature_names = vectorizer.get_feature_names_out()
-
-    vector_df = pd.DataFrame(vector_matrix.toarray(), columns=feature_names)
-    result_df = pd.concat([df, vector_df], axis=1)
-
-    return result_df
-
-
 def main():
     df = process_amp_files(DATA_DIR)
 
-    df = vectorize_sequence_column(df, sequence_column='sequence')
+    df = (df.rename(columns={'category': 'target'}))
+    df = df.drop(columns='dataset')
+    print(df.head(2))
 
-    df = (df.drop(columns=['sequence'])
-            .rename(columns={'category': 'target'}))
-
-    df_train = df[df['dataset'] == 'train']
-    df_test = df[df['dataset'] == 'test']
-
-    df_train = df_train.drop(columns='dataset')
-    df_test = df_test.drop(columns='dataset')
-
-    print(df_train.shape)
-    print(df_test.shape)
-    print(df_train.head(2))
-    print('\n')
-    print(df_test.head(2))
+    df.to_csv('pesticides_peptides.csv', index=False)
 
 
 if __name__ == '__main__':

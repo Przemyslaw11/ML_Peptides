@@ -1,4 +1,3 @@
-from sklearn.feature_extraction.text import CountVectorizer
 import pandas as pd
 import os
 
@@ -52,42 +51,17 @@ def process_files(directory):
     return create_dataframe(all_peptides)
 
 
-def vectorize_sequence_column(df, sequence_column='sequence'):
-    vectorizer = CountVectorizer(analyzer='char', lowercase=False)
-
-    # Fit and transform the sequences
-    vector_matrix = vectorizer.fit_transform(df[sequence_column])
-
-    # Get the feature names (amino acids)
-    feature_names = vectorizer.get_feature_names_out()
-
-    vector_df = pd.DataFrame(vector_matrix.toarray(), columns=feature_names)
-    result_df = pd.concat([df, vector_df], axis=1)
-
-    return result_df
-
-
 def main():
     df = process_files(DATA_DIR)
 
     df = df[df['type'] != 'Unknown'].drop(columns=['name'])
 
-    # Vectorized?
-    df_results = vectorize_sequence_column(df)
-    df_results = df_results.rename(columns={"type": "target"})
-    df_results = df_results.drop(columns=['sequence'])
+    df = df.rename(columns={"type": "target"})
+    df = df.drop(columns=['dataset'])
+    print(df.head(2))
+    print(df.shape)
 
-    df_val = df_results[df_results['dataset'] == 'Validation']
-    df_main = df_results[df_results['dataset'] == 'Main']
-
-    df_val = df_val.drop(columns='dataset')
-    df_main = df_main.drop(columns='dataset')
-
-    print(df_val.shape)
-    print(df_main.shape)
-    print(df_main.head(2))
-    print('\n')
-    print(df_val.head(2))
+    df.to_csv('hemo_pi.csv', index=False)
 
 
 if __name__ == '__main__':
