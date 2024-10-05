@@ -8,6 +8,8 @@ from sklearn.preprocessing import LabelEncoder
 import pandas as pd
 from tqdm import tqdm
 
+from data_utils import sample_target_rows
+
 
 class PeptideDataset(Dataset):
     def __init__(self, sequences, labels, tokenizer, max_length=512):
@@ -99,18 +101,13 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.001):
     return model
 
 
-def sample_target_rows(df, n=100):
-    positive_samples = df[df['target'] == 'Positive'].sample(n=n, random_state=42)
-    negative_samples = df[df['target'] == 'Negative'].sample(n=n, random_state=42)
-
-    result = pd.concat([positive_samples, negative_samples])
-    result = result.reset_index(drop=True)
-
-    return result
-
-
 if __name__ == "__main__":
     df = pd.read_csv('hemopi_data.csv')
+
+    df = df[['sequence', 'target']]
+    df = sample_target_rows(df)
+    print(df.shape)
+
     le = LabelEncoder()
     df['target_encoded'] = le.fit_transform(df['target'])
 
