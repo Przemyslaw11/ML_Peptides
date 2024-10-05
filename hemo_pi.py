@@ -68,22 +68,27 @@ def vectorize_sequence_column(df, sequence_column='sequence'):
 
 
 def main():
-    DATA_PATH = 'data/HemoPI'
-    df = process_files(DATA_PATH)
+    DATA_DIR = 'data/HemoPI'
+    df = process_files(DATA_DIR)
 
     df = df[df['type'] != 'Unknown'].drop(columns=['name'])
 
-    df_val = df[df['dataset'] == 'Validation']
-    df_main = df[df['dataset'] == 'Main']
+    # Vectorized?
+    df_results = vectorize_sequence_column(df)
+    df_results = df_results.rename(columns={"type": "target"})
+    df_results = df_results.drop(columns=['sequence'])
+
+    df_val = df_results[df_results['dataset'] == 'Validation']
+    df_main = df_results[df_results['dataset'] == 'Main']
+
+    df_val = df_val.drop(columns='dataset')
+    df_main = df_main.drop(columns='dataset')
 
     print(df_val.shape)
     print(df_main.shape)
-
-    # Vectorized?
-    df_results = vectorize_sequence_column(df_main)
-    df_results = df_results.rename(columns={"type": "target"})
-    df_results = df_results.drop(columns=['sequence', 'dataset'])
-    print(df_results.head(2))
+    print(df_main.head(2))
+    print('\n')
+    print(df_val.head(2))
 
 
 if __name__ == '__main__':
