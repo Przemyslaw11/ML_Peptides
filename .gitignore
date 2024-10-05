@@ -1,3 +1,9 @@
+# DO NOT DELETE
+best_peptide_classifier.pth
+final_peptide_classifier.pth
+hemopi_data.csv
+/lrgb
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
