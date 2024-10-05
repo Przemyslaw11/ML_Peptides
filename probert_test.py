@@ -140,6 +140,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
 
 
 if __name__ == "__main__":
+    wandb.require("legacy-service")
     wandb.init(project="peptide-classification", entity="ai-development")
 
     df = pd.read_csv('hemopi_data.csv')
@@ -172,9 +173,13 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=32)
 
-    model = (vocab_size, embed_dim, num_classes, max_length)
+    model = PeptideClassifier(vocab_size, embed_dim, num_classes, max_length)
 
-    wandb.watch(model)
+    try:
+        wandb.watch(model)
+    except ValueError as e:
+        print(f"Warning: Could not watch model. Error: {e}")
+        print(f"Model type: {type(model)}")
 
     trained_model = train_model(model, train_loader, val_loader)
 
