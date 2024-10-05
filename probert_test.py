@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
-from transformers import BertTokenizer, BertModel, get_linear_schedule_with_warmup
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
@@ -9,91 +8,87 @@ import pandas as pd
 from tqdm import tqdm
 import numpy as np
 
-# Assuming data_utils.py contains this function
-from data_utils import sample_target_rows
-
 class PeptideDataset(Dataset):
-    def __init__(self, sequences, labels, tokenizer, max_length=128):
+    def __init__(self, sequences, labels, max_length=128):
         self.sequences = sequences
         self.labels = labels
-        self.tokenizer = tokenizer
         self.max_length = max_length
-
+        self.aa_to_int = {aa: i+1 for i, aa in enumerate('ACDEFGHIKLMNPQRSTVWY')}
+        
     def __len__(self):
         return len(self.sequences)
-
+    
     def __getitem__(self, idx):
         sequence = self.sequences[idx]
         label = self.labels[idx]
-
-        encoding = self.tokenizer.encode_plus(
-            sequence,
-            add_special_tokens=True,
-            max_length=self.max_length,
-            padding='max_length',
-            truncation=True,
-            return_attention_mask=True,
-            return_tensors='pt'
-        )
-
+        
+        seq_ints = [self.aa_to_int.get(aa, 0) for aa in sequence[:self.max_length]]
+        seq_ints = seq_ints + [0] * (self.max_length - len(seq_ints))
+        
         return {
-            'input_ids': encoding['input_ids'].flatten(),
-            'attention_mask': encoding['attention_mask'].flatten(),
+            'input_ids': torch.tensor(seq_ints, dtype=torch.long),
             'labels': torch.tensor(label, dtype=torch.long)
         }
 
-class ProtBERTClassifier(nn.Module):
-    def __init__(self, num_classes, dropout_rate=0.1):
-        super(ProtBERTClassifier, self).__init__()
-        self.bert = BertModel.from_pretrained("Rostlab/prot_bert")
-        self.dropout = nn.Dropout(dropout_rate)
-        self.classifier = nn.Linear(self.bert.config.hidden_size, num_classes)
+class ImprovedPeptideClassifier(nn.Module):
+    def __init__(self, vocab_size, embed_dim, num_classes, max_length):
+        super(ImprovedPeptideClassifier, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.conv1 = nn.Conv1d(embed_dim, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv1d(128, 256, kernel_size=3, padding=1)
+        self.pool = nn.AdaptiveMaxPool1d(1)
+        self.fc1 = nn.Linear(256, 128)
+        self.fc2 = nn.Linear(128, num_classes)
+        self.dropout = nn.Dropout(0.5)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.bn3 = nn.BatchNorm1d(256)
+        
+    def forward(self, x):
+        x = self.embedding(x).transpose(1, 2)
+        x = torch.relu(self.bn1(self.conv1(x)))
+        x = torch.relu(self.bn2(self.conv2(x)))
+        x = torch.relu(self.bn3(self.conv3(x)))
+        x = self.pool(x).squeeze(2)
+        x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
+        return self.fc2(x)
 
-    def forward(self, input_ids, attention_mask):
-        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :]  # Use CLS token
-        pooled_output = self.dropout(pooled_output)
-        return self.classifier(pooled_output)
-
-def train_model(model, train_loader, val_loader, num_epochs=10, lr=2e-5, weight_decay=0.01):
+def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     
-    total_steps = len(train_loader) * num_epochs
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=total_steps)
-
+    criterion = nn.CrossEntropyLoss()
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, verbose=True)
+    
     best_val_accuracy = 0
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
         correct_train = 0
         total_train = 0
-
+        
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
             input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
             labels = batch['labels'].to(device)
-
+            
             optimizer.zero_grad()
-            outputs = model(input_ids, attention_mask)
+            outputs = model(input_ids)
             loss = criterion(outputs, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-            scheduler.step()
-
+            
             total_loss += loss.item()
             _, predicted = torch.max(outputs, 1)
             total_train += labels.size(0)
             correct_train += (predicted == labels).sum().item()
-
+        
         avg_train_loss = total_loss / len(train_loader)
         train_accuracy = correct_train / total_train
-
-        # Validation
+        
         model.eval()
         correct_val = 0
         total_val = 0
@@ -101,16 +96,15 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=2e-5, weight_
         with torch.no_grad():
             for batch in val_loader:
                 input_ids = batch['input_ids'].to(device)
-                attention_mask = batch['attention_mask'].to(device)
                 labels = batch['labels'].to(device)
-
-                outputs = model(input_ids, attention_mask)
+                
+                outputs = model(input_ids)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
                 _, predicted = torch.max(outputs, 1)
                 total_val += labels.size(0)
                 correct_val += (predicted == labels).sum().item()
-
+        
         val_accuracy = correct_val / total_val
         avg_val_loss = val_loss / len(val_loader)
         
@@ -118,36 +112,40 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=2e-5, weight_
         print(f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}")
         print(f"Val Loss: {avg_val_loss:.4f}, Val Accuracy: {val_accuracy:.4f}")
         
+        scheduler.step(val_accuracy)
+        
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
-            torch.save(model.state_dict(), 'best_protbert_classifier.pth')
+            torch.save(model.state_dict(), 'best_peptide_classifier.pth')
             print(f"New best model saved with validation accuracy: {best_val_accuracy:.4f}")
-
+    
     return model
 
 if __name__ == "__main__":
-    df = pd.read_csv('hemo_pi.csv')
+    df = pd.read_csv('hemopi_data.csv')
+    
     df = df[['sequence', 'target']]
-    df = sample_target_rows(df)
     print(f"Dataset shape: {df.shape}")
     print(f"Class distribution:\n{df['target'].value_counts(normalize=True)}")
-
+    
     le = LabelEncoder()
     df['target_encoded'] = le.fit_transform(df['target'])
-
+    
     train_df, val_df = train_test_split(df, test_size=0.2, stratify=df['target'], random_state=42)
-
-    tokenizer = BertTokenizer.from_pretrained("Rostlab/prot_bert", do_lower_case=False)
-
-    train_dataset = PeptideDataset(train_df['sequence'].tolist(), train_df['target_encoded'].tolist(), tokenizer)
-    val_dataset = PeptideDataset(val_df['sequence'].tolist(), val_df['target_encoded'].tolist(), tokenizer)
-
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=16)
-
+    
+    max_length = 128
+    vocab_size = 22 
+    embed_dim = 32
     num_classes = len(le.classes_)
-    model = ProtBERTClassifier(num_classes)
-
-    trained_model = train_model(model, train_loader, val_loader, num_epochs=20, lr=2e-5)
-
-    torch.save(trained_model.state_dict(), 'final_protbert_classifier.pth')
+    
+    train_dataset = PeptideDataset(train_df['sequence'].tolist(), train_df['target_encoded'].tolist(), max_length)
+    val_dataset = PeptideDataset(val_df['sequence'].tolist(), val_df['target_encoded'].tolist(), max_length)
+    
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=32)
+    
+    model = ImprovedPeptideClassifier(vocab_size, embed_dim, num_classes, max_length)
+    
+    trained_model = train_model(model, train_loader, val_loader)
+    
+    torch.save(trained_model.state_dict(), 'final_peptide_classifier.pth')
