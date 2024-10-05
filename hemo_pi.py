@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 # Binary Classification (positive, negative peptides) based on amino sequence
-DATA_PATH = 'data/HemoPI'
+DATA_DIR = 'data/HemoPI'
 
 
 def extract_peptides(file_content, type_, dataset):
@@ -68,7 +68,6 @@ def vectorize_sequence_column(df, sequence_column='sequence'):
 
 
 def main():
-    DATA_DIR = 'data/HemoPI'
     df = process_files(DATA_DIR)
 
     df = df[df['type'] != 'Unknown'].drop(columns=['name'])
